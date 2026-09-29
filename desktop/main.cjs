@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog, shell, screen } = require('electron');
 const { fork, execFile } = require('node:child_process');
 const fs = require('node:fs/promises');
 const { createWriteStream } = require('node:fs');
@@ -11,9 +11,19 @@ app.setAppUserModelId('local.buddy.bridge');
 let window, tray, service, timer, log, quitting = false, mayQuit = false, actionBusy = false;
 let state = { phase: 'starting', message: '正在启动隔离模型服务', models: [], modelResults: {} };
 let dataDir, lastMenu = '';
-let TARGETS, targetIDs, targetFor, routeFor;
+let TARGETS, targetIDs, targetFor, routeFor, downloadURL;
 const page = pathToFileURL(path.join(__dirname, 'index.html')).href;
 
+// A window placed on a monitor that has since been unplugged is unreachable, and macOS
+// does not pull it back. Pull it onto the primary display so the panel stays usable.
+const overlaps = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+function keepOnScreen(win) {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  if (screen.getAllDisplays().some(display => overlaps(bounds, display.bounds))) return;
+  const area = screen.getPrimaryDisplay().workArea;
+  win.setBounds({ x: area.x + 60, y: area.y + 40, width: bounds.width, height: bounds.height });
+}
 function showWindow() {
   if (!window) {
     window = new BrowserWindow({ width: 1040, height: 740, minWidth: 880, minHeight: 620, title: 'OW Bridge', backgroundColor: '#ffffff',
@@ -26,7 +36,9 @@ function showWindow() {
     window.on('blur', () => window.webContents.send('dismiss-details'));
     window.on('session-end', () => app.quit());
     window.loadFile(path.join(__dirname, 'index.html'));
+    screen.on('display-removed', () => keepOnScreen(window));
   }
+  keepOnScreen(window);
   window.show(); window.focus();
 }
 function activityLabel(s) {
@@ -64,12 +76,20 @@ async function readState() {
 // Each import action names the WorkBuddy build it writes to, so the two never touch
 // each other's configuration. The mapping is shared with the service and covered by tests.
 async function action(name, value) {
-  if (!['refresh', 'probe', ...targetIDs.map(id => TARGETS[id].action), 'system-proxy', 'restart', 'choose-config'].includes(name)) throw new Error('未知操作');
+  if (!['refresh', 'probe', 'download', ...targetIDs.map(id => TARGETS[id].action), 'system-proxy', 'restart', 'choose-config'].includes(name)) throw new Error('未知操作');
   if (actionBusy) throw new Error('请等待当前操作完成');
   if (name === 'restart') {
     actionBusy = name; publish();
     try { await stopService(); state = { phase: 'starting', message: '正在启动隔离模型服务', models: [], modelResults: {} }; await startService(); return {}; }
     finally { actionBusy = false; publish(); }
+  }
+  // Opening a page in the browser must keep working while detection runs, so it never
+  // takes the busy lock and never depends on the proxy being ready.
+  if (name === 'download') {
+    const url = downloadURL(value);
+    if (!url) throw new Error('未知的下载来源');
+    await shell.openExternal(url);
+    return { url };
   }
   if ((state.phase !== 'ready' && !(name === 'system-proxy' && state.phase === 'error')) || state.probe?.running) throw new Error('请等待服务启动和检测完成');
   if (name === 'system-proxy' && typeof value !== 'boolean') throw new Error('代理开关必须为布尔值');
@@ -143,6 +163,7 @@ else {
   app.whenReady().then(async () => {
     const { dataDirectory } = await import('../src/platform.js');
     ({ TARGETS, targetIDs, targetFor, routeFor } = await import('../src/targets.js'));
+    ({ downloadURL } = await import('../src/downloads.js'));
     dataDir = process.env.BUDDY_DATA_DIR || dataDirectory();
     Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'OW Bridge', submenu: [{ label: '退出 OW Bridge', role: 'quit' }] }, { label: '编辑', submenu: [{ label: '复制', role: 'copy' }, { label: '全选', role: 'selectAll' }] }]));
     app.setPath('userData', dataDir);

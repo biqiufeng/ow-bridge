@@ -97,6 +97,12 @@ async function run(name, value) {
 }
 function feedback(text, error = false) { $('feedback').textContent = text; $('feedback').className = error ? 'error' : ''; $('feedback').hidden = false; }
 for (const action of ['refresh', 'probe', 'import', 'import-ai', 'restart']) $(action).onclick = () => run(action);
+// Download links stay enabled while detection runs, so they are wired outside run()'s busy lock.
+for (const [id, build] of [['download-cn', 'workbuddy'], ['download-ai', 'workbuddy-ai']])
+  $(id).onclick = async () => {
+    try { await window.buddy.action('download', build); }
+    catch (error) { feedback(error.message, true); }
+  };
 $('proxy').onchange = () => run('system-proxy', $('proxy').checked);
 function dismiss() { selected = null; renderModels(); renderDetails(); }
 document.addEventListener('click', e => { if (!e.target.closest('.model') && !e.target.closest('#details')) dismiss(); });
