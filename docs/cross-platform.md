@@ -15,19 +15,23 @@
 
 ## 数据目录
 
-| 系统 | 应用数据 | WorkBuddy 配置 |
-|---|---|---|
-| macOS | `~/Library/Application Support/Buddy Bridge` | `~/.workbuddy/models.json` |
-| Windows | `%APPDATA%\Buddy Bridge` | `%USERPROFILE%\.workbuddy\models.json` |
-| Linux（实验性） | `$XDG_CONFIG_HOME/Buddy Bridge` 或 `~/.config/Buddy Bridge` | `~/.workbuddy/models.json` |
+| 系统 | 应用数据 | 国内版 WorkBuddy | 海外版 WorkBuddy AI |
+|---|---|---|---|
+| macOS | `~/Library/Application Support/Buddy Bridge` | `~/.workbuddy/models.json` | `~/.workbuddy-ai/models.json` |
+| Windows | `%APPDATA%\Buddy Bridge` | `%USERPROFILE%\.workbuddy\models.json` | `%USERPROFILE%\.workbuddy-ai\models.json` |
+| Linux（实验性） | `$XDG_CONFIG_HOME/Buddy Bridge` 或 `~/.config/Buddy Bridge` | `~/.workbuddy/models.json` | `~/.workbuddy-ai/models.json` |
 
-OW Bridge 沿用旧版数据目录和内部应用标识，因此代理开关、运行时和本地 Key 可继续使用。自定义路径仍可通过 `BUDDY_DATA_DIR`、`BUDDY_MODELS_FILE` 指定。Windows WorkBuddy 路径与真实客户端读取行为仍需 Windows 实机确认。
+两个版本共用同一个 `models.json` 格式（数组或 `{ models, availableModels }`），差别只在目录：海外版在自己的 `cli/product.json` 里声明了 `config.customUserDataDir = .workbuddy-ai`，客户端据此拼出路径。两者的 `CustomModelsJSON`、`CustomModelIdPrefix` 均为 `true`，所以本应用写入的条目在两边都可直接使用。`buddyBridgeOwner` 是本应用自己的标记，两个客户端读取和回写时都会原样保留整个模型对象。
+
+每个导入按钮只写自己那一份文件，互不影响。启动自动导入只写国内版，因此未配置过的海外版不会被自动创建 `models.json`，点它自己的按钮时才创建。`src/targets.js` 是唯一记录「按钮 → 版本 → 目录」关系的地方，界面、托盘和服务都从它取。
+
+OW Bridge 沿用旧版数据目录和内部应用标识，因此代理开关、运行时和本地 Key 可继续使用。自定义路径仍可通过 `BUDDY_DATA_DIR`、`BUDDY_MODELS_FILE` 指定。`BUDDY_MODELS_FILE` 仍会把所有版本指向同一个文件（测试与容器依赖这一点）；只覆盖海外版可用 `BUDDY_AI_MODELS_FILE`。设置里记住的位置按版本分开存放。Windows 两条路径与真实客户端读取行为仍需 Windows 实机确认。
 
 ## 运行时安装与退出
 
 OpenCode 优先复用应用目录内已有的可用版本，或复制发现的本机版本；需要下载时从 npm 官方对应平台包的 `latest` 获取，不固定版本，也不在每次启动时强制升级。下载后校验 SHA-512，只提取指定二进制文件；Windows 使用 opencode.exe。解压采用 Node tar，不依赖系统 curl/tar。
 
-正常退出通过 IPC 请求后台清理本应用导入的 WorkBuddy 模型，再结束 OpenCode。后台与 Electron 失去 IPC 连接时也会执行清理。强杀或断电无法保证退出清理，下一次启动会清除旧的受管理配置。测试覆盖退出发生在检测中的场景。
+正常退出通过 IPC 请求后台清理**所有版本**中本应用导入的 WorkBuddy 模型，再结束 OpenCode。只清理最后导入的那一个会让另一版本残留指向已停止代理的死模型。启动时同样先清理所有版本，用于兜底强杀或断电。测试锁定这一行为。
 
 Windows 支持手动系统代理，包括统一端口和按协议指定端口；不支持仅 PAC/SOCKS。Linux 构建脚本预留，但系统代理读取和 WorkBuddy 实机集成尚未支持/验证。
 

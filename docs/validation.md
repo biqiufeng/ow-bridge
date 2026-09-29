@@ -276,3 +276,15 @@ WorkBuddy 历史记录显示 HTTP/流级格式错误会结束当前请求，需�
 ## 2026-09-27 撤回连续执行提示
 
 22:35 加入连续执行提示后，22:41 和 22:48 两个 Space Bunny 任务分别出现 0 次工具调用；此前 22:19 任务有 15 次工具调用但存在间歇停顿。此时间关联不足以证明因果，然而没有真实行为改善证据，不应继续保留该提示强化。仅移除新增一句提示，protocol.js 与 da26ecc 的父提交逐字一致，保留此前协议兼容、用量和其他独立修复。85 项测试通过仅证明程序回归，不能证明模型持续执行能力已恢复。本机原 App 同步回退。
+
+## 2026-09-29 双版本导入（国内版 + 海外版 WorkBuddy AI）
+
+本机同时安装两个 WorkBuddy：国内版 `/Applications/WorkBuddy.app`（`com.tencent.workbuddy.mac`，`www.workbuddy.cn`）与海外版 `/Applications/WorkBuddy AI.app`（`com.workbuddy.workbuddy-ai`，`www.workbuddy.ai`）。原实现只持有一个 `modelsFile`，只能服务其中一个。
+
+配置路径来源已从两个 `app.asar` 核对：`resolveWorkbuddyDataFolderName()` 读 `cli/product.json` 的 `dataFolderName`，海外版通过 `config.customUserDataDir = ".workbuddy-ai"` 得到 `~/.workbuddy-ai`，国内版无该字段故回落 `.workbuddy`。两者的 `CustomModelsJSON`、`CustomModelIdPrefix` 都是 `true`，读取路径同为 `path.join(configDir, "models.json")`，格式一致，无需转换。
+
+- 启动：`status.json` 的 `modelsFiles` 解析出两个目标；自动导入只写 `~/.workbuddy/models.json`（6 个模型），`~/.workbuddy-ai/models.json` 保持不存在 —— 未点击的版本不会被创建。
+- 写入：`POST /admin/import {"target":"workbuddy-ai"}` 返回 `{"changed":true,"count":6,"label":"WorkBuddy AI"}`，海外版文件得到 6 个条目，国内版文件字节不变。重复执行返回 `changed:false`。
+- 真实缺陷：界面点击“导入 WorkBuddy AI”曾报 `Not found`。原因是 `desktop/main.cjs` 把动作名直接当路由，POST 到并不存在的 `/admin/import-ai`。现在所有导入动作共用 `/admin/import`，版本放在请求体里。该映射原先只存在于无法被测试加载的 Electron 主进程，已提取到 `src/targets.js`；`test/targets.test.js` 反证确认（把 `routeFor` 改成恒等映射即失败）。
+- 退出清理覆盖两个目标：把 `shutdown()` 改回只清理国内版，`test/lifecycle.test.js` 立即失败于「Exit cleans every build」。
+- 87 项测试通过。界面按钮、托盘菜单、退出清理均已实机观察；海外版客户端内的模型列表显示未人工确认。

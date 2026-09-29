@@ -27,14 +27,15 @@
 
 - macOS：解压 `OW-Bridge-0.2.2-mac-arm64.zip`，双击 OW Bridge.app。
 - Windows x64：运行 `OW-Bridge-0.2.2-win-x64.exe` 安装，再从桌面启动。Windows 包已构建，尚需实机验收。
-- 首次启动自动准备 OpenCode、扫描免费模型、检测可用性；找到有效 WorkBuddy 配置后自动导入。
-- macOS 保持使用 `~/.workbuddy/models.json`。Windows 自动识别默认配置、已保存位置和 WorkBuddy 配置目录环境变量。找不到时点击“导入 WorkBuddy”选择已有的 `models.json`；首次使用请先在 WorkBuddy 保存一个自定义模型。Windows 托盘菜单“选择 WorkBuddy 配置…”可更换位置，切换时清理旧文件中的本应用条目。不会在猜测的位置新建模型配置。
-- 后续重新扫描或检测不会改 WorkBuddy；点击“导入 WorkBuddy”更新，界面会反馈结果。
-- 关闭窗口继续在托盘运行；从托盘退出时删除本应用导入的模型，保留用户手动配置。
+- 首次启动自动准备 OpenCode、扫描免费模型、检测可用性；检测完成后自动导入国内版 WorkBuddy。
+- **同时装了海外版 WorkBuddy AI 时，点击“导入 WorkBuddy AI”再导入一次。** 两个版本配置格式相同但目录不同：国内版 `~/.workbuddy/models.json`，海外版 `~/.workbuddy-ai/models.json`（该目录由海外版自己的 `customUserDataDir` 决定）。两个按钮各自只写自己的文件，互不影响。
+- 启动自动导入只写国内版，因此从未配置过的海外版不会被自动创建 `models.json`；点它自己的按钮时才创建。macOS 直接使用上述固定路径。Windows 自动识别默认配置、已保存位置和 WorkBuddy 配置目录环境变量；找不到时点击对应的导入按钮选择已有的 `models.json`，首次使用请先在 WorkBuddy 保存一个自定义模型。Windows 托盘菜单“选择 WorkBuddy 配置…”可更换国内版位置，切换时清理旧文件中的本应用条目。不会在猜测的位置新建模型配置。
+- 后续重新扫描或检测不会改任何 WorkBuddy；点击对应的导入按钮更新，界面会反馈结果。两个版本都需要更新时分别点击。
+- 关闭窗口继续在托盘运行；从托盘退出时删除**所有版本**中本应用导入的模型，保留用户手动配置。
 - 图片输入、推理声明和档位、输入输出上限读取 OpenCode 目录；工具转换能力通过模拟工具请求检测。
 - 系统代理开关支持 Mac 和 Windows 的手动 HTTP/HTTPS 代理。
 
-使用问题在抖音/视频号 @娄老师说的对
+使用问题请看 X @BiQiu16871 ｜ 小红书：秋枫的AI职场笔记
 
 ## 开发与打包
 
@@ -56,7 +57,7 @@ Windows ARM64：`npm run build:win:arm64`。Linux 的 `npm run build:linux` 为�
 
 所有可用模型在本地 API 中公开。只通过普通对话检测的模型关闭工具调用；不可用模型仍显示在列表，但不会提供给 WorkBuddy。检测提供多个外部工具且不强制调用：只回复文本、不产生动作的模型按**仅对话**发布（工具关闭，界面显示"可用 · 仅对话"），不会通过检测后浪费真实轮次；真实超时单独记为"检测超时"。语义没命中（只回文本、或动作与请求不符）会重试一次再判定，共用同一个 60 秒预算；格式不兼容与超时不重试。
 
-模型名称是 `OC · ` 加 OpenCode 原名。导入和退出只修改 `buddyBridgeOwner` 属于本应用的条目，并在实际写入前备份；手动配置保留。配置路径默认 `~/.workbuddy/models.json`，Windows 的 `~` 对应用户目录。
+模型名称是 `OC · ` 加 OpenCode 原名。导入和退出只修改 `buddyBridgeOwner` 属于本应用的条目，并在实际写入前备份；手动配置保留。配置路径默认 `~/.workbuddy/models.json`（国内版）与 `~/.workbuddy-ai/models.json`（海外版），Windows 的 `~` 对应用户目录。
 
 图片接受 PNG/JPEG/WebP/GIF 的 base64 data URL，不接受远程图片链接或本地文件路径，整个请求上限 8 MB。图片作为附件转发，不调用 OpenCode 原生读取工具。
 
