@@ -11,8 +11,11 @@ import { OWNER } from '../src/sync.js';
 test('startup imports once; repeated checks and reads require import; exit removes owned models', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'buddy-lifecycle-'));
   const config = path.join(root, 'models.json');
+  const overseas = path.join(root, 'overseas', 'models.json');
   const manual = { id: 'personal', apiKey: 'keep' };
   await fs.writeFile(config, JSON.stringify([manual, { id: 'old-owned', buddyBridgeOwner: OWNER }]));
+  await fs.mkdir(path.dirname(overseas));
+  await fs.writeFile(overseas, JSON.stringify([manual, { id: 'old-overseas-owned', buddyBridgeOwner: OWNER }]));
   const catalog = { models: [{ id: 'opencode/a', name: 'A' }, { id: 'opencode/b', name: 'B' }], failed: [] };
   const writeCatalog = () => fs.writeFile(path.join(root, 'catalog.json'), JSON.stringify(catalog));
   await writeCatalog();
@@ -22,7 +25,7 @@ test('startup imports once; repeated checks and reads require import; exit remov
   await new Promise(resolve => socket.close(resolve));
   const child = spawn(process.execPath, ['--loader', new URL('./fixtures/runtime-loader.mjs', import.meta.url).href, 'src/main.js'], {
     cwd: fileURLToPath(new URL('..', import.meta.url)),
-    env: { ...process.env, BUDDY_DATA_DIR: root, BUDDY_PORT: String(port), BUDDY_MODELS_FILE: config, BUDDY_NO_SYNC: '0' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    env: { ...process.env, BUDDY_DATA_DIR: root, BUDDY_PORT: String(port), BUDDY_MODELS_FILE: config, BUDDY_AI_MODELS_FILE: overseas, BUDDY_NO_SYNC: '0' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   let logs = ''; child.stdout.on('data', x => logs += x); child.stderr.on('data', x => logs += x);
   const exited = new Promise(resolve => child.once('exit', resolve));
@@ -39,11 +42,13 @@ test('startup imports once; repeated checks and reads require import; exit remov
   try {
     await waitFor(s => s.probe.running);
     assert.deepEqual(JSON.parse(await fs.readFile(config, 'utf8')), [manual], 'Startup clears old owned entries before detection');
+    assert.deepEqual(JSON.parse(await fs.readFile(overseas, 'utf8')), [manual], 'Startup clears every build it manages');
     await waitFor(s => s.phase === 'ready' && !s.probe.running);
     const initial = await fs.readFile(config, 'utf8');
     const backups = async () => (await fs.readdir(root)).filter(name => name.endsWith('.bak')).length;
     assert.equal(await backups(), 2, 'One startup cleanup and one import after the full batch');
     assert.deepEqual(JSON.parse(initial).map(m => m.id), ['personal', 'OC · A', 'OC · B']);
+    assert.deepEqual(JSON.parse(await fs.readFile(overseas, 'utf8')), [manual], 'Startup auto-import stays on the primary build');
     const key = (await fs.readFile(path.join(root, 'api-key'), 'utf8')).trim();
     async function post(route, payload = {}) {
       const response = await fetch(`http://127.0.0.1:${port}/admin/${route}`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -81,6 +86,14 @@ test('startup imports once; repeated checks and reads require import; exit remov
     assert.equal(await backups(), 2, 'Repeated checks and reads produce no config writes');
     await post('import');
     assert.deepEqual(JSON.parse(await fs.readFile(config, 'utf8')).map(m => m.id), ['personal', 'OC · A']);
+    assert.deepEqual(JSON.parse(await fs.readFile(overseas, 'utf8')), [manual], 'Importing one build never writes the other');
+    const domestic = await fs.readFile(config, 'utf8');
+    await post('import', { target: 'workbuddy-ai' });
+    assert.deepEqual(JSON.parse(await fs.readFile(overseas, 'utf8')).map(m => m.id), ['personal', 'OC · A'], 'The overseas button writes only the overseas configuration');
+    assert.equal(await fs.readFile(config, 'utf8'), domestic, 'The overseas button leaves the domestic configuration alone');
+    const rejected = await fetch(`http://127.0.0.1:${port}/admin/import`, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ target: 'nope' }) });
+    assert.equal(rejected.status, 502);
+    assert.match((await rejected.json()).error.message, /未知的导入目标/);
     catalog.failed = []; catalog.chatOnly = ['opencode/b']; await writeCatalog();
     await post('probe');
     await waitFor(s => s.probe.running);
@@ -104,6 +117,7 @@ test('startup imports once; repeated checks and reads require import; exit remov
     child.send('shutdown'); await exited;
     await assert.rejects(fs.stat(alternate), { code: 'ENOENT' });
     assert.deepEqual(JSON.parse(await fs.readFile(config, 'utf8')), [manual], 'Exit cleans the selected configuration');
+    assert.deepEqual(JSON.parse(await fs.readFile(overseas, 'utf8')), [manual], 'Exit cleans every build, not just the one last imported');
   } finally {
     if (child.exitCode === null) { child.send('shutdown'); await exited; }
     await fs.rm(root, { recursive: true, force: true });

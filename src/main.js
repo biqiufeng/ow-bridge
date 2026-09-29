@@ -3,6 +3,7 @@ import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveModelsFile, validateModelsFile } from './workbuddy-config.js';
+import { TARGETS, targetIDs } from './targets.js';
 import { dataDirectory } from './platform.js';
 import { randomBytes } from 'node:crypto';
 import { findRuntime, startBackend } from './runtime.js';
@@ -61,19 +62,30 @@ const attachTranslator = runtime => {
   return runtime;
 };
 let syncWrites = Promise.resolve();
-let modelsFile = process.platform === 'win32'
-  ? await resolveModelsFile({ saved: settings.workBuddyModelsFile })
-  : process.env.BUDDY_MODELS_FILE || path.join(os.homedir(), '.workbuddy/models.json');
-update({ modelsFile });
+// One proxy serves both WorkBuddy builds; BUDDY_MODELS_FILE stays a global override
+// that collapses every target onto one file, which is what the tests and the container use.
+const modelsFiles = {};
+for (const [id, spec] of Object.entries(TARGETS)) {
+  const override = process.env[spec.env] || process.env.BUDDY_MODELS_FILE;
+  modelsFiles[id] = process.platform === 'win32'
+    ? await resolveModelsFile({ saved: settings[spec.setting], folder: spec.folder, override })
+    : override || path.join(os.homedir(), spec.folder, 'models.json');
+}
+update({ modelsFiles });
 
-function syncPublished(published = publishedModels()) {
+function syncPublished(published = publishedModels(), targets = targetIDs) {
   syncWrites = syncWrites.then(async () => {
     let sync;
     if (process.env.BUDDY_NO_SYNC === '1') sync = { skipped: true, count: published.length };
     else {
       try {
-        if (!modelsFile) throw new Error('未找到有效的 WorkBuddy 配置，请点击导入并选择 models.json；首次使用请先在 WorkBuddy 保存一个自定义模型。');
-        sync = await syncModels(modelsFile, published, `${endpoint}/chat/completions`, key, { allowEmpty: true, requireExisting: process.platform === 'win32' });
+        const results = [];
+        for (const target of targets) {
+          const file = modelsFiles[target];
+          if (!file) throw new Error(`未找到有效的 ${TARGETS[target].label} 配置，请点击导入并选择 models.json；首次使用请先在 WorkBuddy 保存一个自定义模型。`);
+          results.push(await syncModels(file, published, `${endpoint}/chat/completions`, key, { allowEmpty: true, requireExisting: process.platform === 'win32' }));
+        }
+        sync = { changed: results.some(r => r.changed), count: results[0]?.count, label: targets.map(t => TARGETS[t].label).join('、') };
       }
       catch (e) { sync = { error: e.message }; }
     }
@@ -170,7 +182,9 @@ function startProbes(modelID, reveal = false, autoImport = false) {
         pending.shift();
         update({ probe: { running: true, pending: [...pending] } });
       }
-      if (autoImport && !stopping) await syncPublished();
+      // Startup auto-import stays on the primary build; the overseas one is written
+      // only when its own button is pressed, so an unconfigured build is never touched.
+      if (autoImport && !stopping) await syncPublished(undefined, ['workbuddy']);
     } finally { probing = false; update({ probe: { running: false } }); }
   })().catch(e => console.error('Model detection failed:', e.message));
   return { started: true };
@@ -229,19 +243,22 @@ async function setSystemProxy(enabled) {
   startProbes(undefined, true);
   return { useSystemProxy: enabled };
 }
-async function importModels(selectedFile) {
+async function importModels(target = 'workbuddy', selectedFile) {
   if (stopping || probing || refreshing || state.phase !== 'ready') throw new Error('请等待读取和检测完成后导入');
+  const spec = TARGETS[target];
+  if (!spec) throw new Error('未知的导入目标');
   if (selectedFile !== undefined) {
     await validateModelsFile(selectedFile);
-    if (modelsFile && modelsFile !== selectedFile && await fs.stat(modelsFile).catch(e => { if (e.code === 'ENOENT') return null; throw e; })) {
-      const cleanup = await syncPublished([]);
+    const current = modelsFiles[target];
+    if (current && current !== selectedFile && await fs.stat(current).catch(e => { if (e.code === 'ENOENT') return null; throw e; })) {
+      const cleanup = await syncPublished([], [target]);
       if (cleanup.error) throw new Error(cleanup.error);
     }
-    const nextSettings = { ...settings, workBuddyModelsFile: selectedFile };
+    const nextSettings = { ...settings, [spec.setting]: selectedFile };
     await atomicWrite(settingsFile, JSON.stringify(nextSettings));
-    settings = nextSettings; modelsFile = selectedFile; update({ modelsFile });
+    settings = nextSettings; modelsFiles[target] = selectedFile; update({ modelsFiles });
   }
-  const sync = await syncPublished();
+  const sync = await syncPublished(undefined, [target]);
   if (sync.error) throw new Error(sync.error);
   return sync;
 }

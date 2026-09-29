@@ -20,6 +20,12 @@ test('configuration discovery respects explicit and remembered locations without
     await fs.mkdir(customDir); await fs.writeFile(customFile, '{"models":[]}');
     assert.equal(await resolveModelsFile({ home, env: { WORKBUDDY_CONFIG_DIR: customDir } }), customFile);
     assert.equal(await resolveModelsFile({ home, env: { WORKBUDDY_DATA_FOLDER_NAME: '自定义配置' } }), customFile);
+    assert.equal(await resolveModelsFile({ home, env: { WORKBUDDY_DATA_FOLDER_NAME: '自定义配置' }, folder: '.workbuddy-ai' }), customFile, 'An explicit folder name still wins over the build default');
+    const overseas = path.join(home, '.workbuddy-ai', 'models.json');
+    await fs.mkdir(path.dirname(overseas), { recursive: true });
+    await fs.writeFile(overseas, '[]');
+    assert.equal(await resolveModelsFile({ home, env: {}, folder: '.workbuddy-ai' }), overseas, 'The overseas build keeps its own directory');
+    assert.equal(await resolveModelsFile({ home, env: {}, folder: '.workbuddy' }), defaultFile);
     assert.equal(await resolveModelsFile({ home, env: {}, saved: customFile }), customFile);
     assert.equal(await resolveModelsFile({ home, env: { BUDDY_MODELS_FILE: defaultFile }, saved: customFile }), defaultFile);
     await fs.unlink(customFile);

@@ -5,14 +5,14 @@
 <title>OW Bridge</title><link rel="stylesheet" href="style.css"></head>
 <body>
 <aside>
-  <div class="brand-mark" aria-hidden="true"></div><h1>OW Bridge</h1><p class="tagline">让 WorkBuddy 连接 OpenCode</p>
+  <img class="brand-mark" src="brand.jpeg" alt="AI ROLLIAGE 秋枫的AI职场笔记"><h1>OW Bridge</h1><p class="tagline">让 WorkBuddy 连接 OpenCode</p>
   <div class="section-current">▦ &nbsp; 模型与服务</div>
-  <div class="sidebar-bottom"><label class="toggle-label">使用系统代理 <input id="proxy" type="checkbox" role="switch"></label><p class="creator">使用问题在抖音/视频号<br>@娄老师说的对</p></div>
+  <div class="sidebar-bottom"><label class="toggle-label">使用系统代理 <input id="proxy" type="checkbox" role="switch"></label><p class="creator">使用问题请看<br>X @BiQiu16871<br>小红书：秋枫的AI职场笔记</p></div>
 </aside>
 <main>
   <header><div><h2>免费模型</h2><p class="subtitle">自动发现，保留每一个模型的状态。</p></div><div class="actions"><button id="refresh">读取免费模型</button><button id="probe">检测全部</button></div></header>
   <div class="service-status"><span id="service-dot" class="dot"></span><span id="service-text">正在启动隔离模型服务</span><button id="restart" hidden>重试</button></div>
-  <section class="toolbar"><div class="metrics"><div><b id="discovered">0</b><span>已发现</span></div><div><b id="available">0</b><span>可用</span></div><div><b id="pending">0</b><span>待检测</span></div></div><button id="import" class="primary">导入 WorkBuddy</button></section>
+  <section class="toolbar"><div class="metrics"><div><b id="discovered">0</b><span>已发现</span></div><div><b id="available">0</b><span>可用</span></div><div><b id="pending">0</b><span>待检测</span></div></div><div class="actions"><button id="import" class="primary">导入 WorkBuddy</button><button id="import-ai">导入 WorkBuddy AI</button></div></section>
   <div id="feedback" role="status" hidden></div>
   <section id="models" aria-label="模型列表"></section>
   <section id="details" hidden></section>

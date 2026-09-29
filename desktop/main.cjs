@@ -11,6 +11,7 @@ app.setAppUserModelId('local.buddy.bridge');
 let window, tray, service, timer, log, quitting = false, mayQuit = false, actionBusy = false;
 let state = { phase: 'starting', message: '正在启动隔离模型服务', models: [], modelResults: {} };
 let dataDir, lastMenu = '';
+let TARGETS, targetIDs, targetFor, routeFor;
 const page = pathToFileURL(path.join(__dirname, 'index.html')).href;
 
 function showWindow() {
@@ -48,6 +49,7 @@ function publish() {
     { label: '重新扫描免费模型', enabled: !busy, click: () => trayAction('refresh') },
     { label: '检测全部模型', enabled: !busy, click: () => trayAction('probe') },
     { label: '导入 WorkBuddy', enabled: !busy, click: () => trayAction('import') },
+    { label: '导入 WorkBuddy AI', enabled: !busy, click: () => trayAction('import-ai') },
     ...(process.platform === 'win32' ? [{ label: '选择 WorkBuddy 配置…', enabled: !busy, click: () => trayAction('choose-config') }] : []),
     { label: '模型状态', submenu: (state.models || []).map(m => ({ label: `OC · ${m.name} · ${available.has(m.id) ? state.modelResults?.[m.id]?.chatOnly ? '可用 · 仅对话' : '可用' : '不可用'}`, enabled: false })) },
     { type: 'separator' }, { label: '退出 OW Bridge', click: () => app.quit() },
@@ -59,8 +61,10 @@ async function readState() {
     if (value.pid === service?.pid && !quitting) { state = value; publish(); }
   } catch {}
 }
+// Each import action names the WorkBuddy build it writes to, so the two never touch
+// each other's configuration. The mapping is shared with the service and covered by tests.
 async function action(name, value) {
-  if (!['refresh', 'probe', 'import', 'system-proxy', 'restart', 'choose-config'].includes(name)) throw new Error('未知操作');
+  if (!['refresh', 'probe', ...targetIDs.map(id => TARGETS[id].action), 'system-proxy', 'restart', 'choose-config'].includes(name)) throw new Error('未知操作');
   if (actionBusy) throw new Error('请等待当前操作完成');
   if (name === 'restart') {
     actionBusy = name; publish();
@@ -71,18 +75,18 @@ async function action(name, value) {
   if (name === 'system-proxy' && typeof value !== 'boolean') throw new Error('代理开关必须为布尔值');
   actionBusy = name; publish();
   try {
+    const target = targetFor(name), route = routeFor(name);
     let modelsFile;
-    if (process.platform === 'win32' && (name === 'choose-config' || (name === 'import' && (!state.modelsFile || !(await fs.stat(state.modelsFile).catch(() => null))?.isFile())))) {
+    if (process.platform === 'win32' && target && (name === 'choose-config' || !(await fs.stat(state.modelsFiles?.[target]).catch(() => null))?.isFile())) {
       const selection = await dialog.showOpenDialog({ title: '选择 WorkBuddy 的 models.json', message: '请选择 WorkBuddy 实际使用的配置文件。首次使用请先在 WorkBuddy 保存一个自定义模型。', properties: ['openFile'], filters: [{ name: 'JSON 配置', extensions: ['json'] }] });
       if (selection.canceled || !selection.filePaths.length) return { canceled: true };
       modelsFile = selection.filePaths[0];
-      name = 'import';
     }
     const key = (await fs.readFile(path.join(dataDir, 'api-key'), 'utf8')).trim();
     const endpoint = `http://127.0.0.1:${Number(process.env.BUDDY_PORT || 41980)}`;
-    const response = await fetch(`${endpoint}/admin/${name}`, { method: 'POST',
+    const response = await fetch(`${endpoint}/admin/${route}`, { method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(name === 'system-proxy' ? { enabled: value } : modelsFile ? { modelsFile } : {}), signal: AbortSignal.timeout(150000) });
+      body: JSON.stringify(name === 'system-proxy' ? { enabled: value } : { target, modelsFile }), signal: AbortSignal.timeout(150000) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error?.message || `HTTP ${response.status}`);
     await readState();
@@ -92,11 +96,12 @@ async function action(name, value) {
 async function trayAction(name) {
   try {
     const result = await action(name);
-    if (['import', 'choose-config'].includes(name) && !result.canceled) await dialog.showMessageBox({ type: 'info', title: 'OW Bridge', message: '导入完成', detail: importMessage(result) });
+    if (targetFor(name) && !result.canceled) await dialog.showMessageBox({ type: 'info', title: 'OW Bridge', message: '导入完成', detail: importMessage(result) });
   } catch (e) { await dialog.showMessageBox({ type: 'error', title: 'OW Bridge', message: '操作失败', detail: e.message }); }
 }
 function importMessage(result) {
-  return result.changed === false ? `WorkBuddy 配置已是最新，共 ${result.count} 个模型，无需重复写入。` : `已将 ${result.count} 个可用模型导入 WorkBuddy。`;
+  const to = result.label || 'WorkBuddy';
+  return result.changed === false ? `${to} 配置已是最新，共 ${result.count} 个模型，无需重复写入。` : `已将 ${result.count} 个可用模型导入 ${to}。`;
 }
 async function startService() {
   await fs.mkdir(dataDir, { recursive: true });
@@ -137,6 +142,7 @@ else {
   });
   app.whenReady().then(async () => {
     const { dataDirectory } = await import('../src/platform.js');
+    ({ TARGETS, targetIDs, targetFor, routeFor } = await import('../src/targets.js'));
     dataDir = process.env.BUDDY_DATA_DIR || dataDirectory();
     Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'OW Bridge', submenu: [{ label: '退出 OW Bridge', role: 'quit' }] }, { label: '编辑', submenu: [{ label: '复制', role: 'copy' }, { label: '全选', role: 'selectAll' }] }]));
     app.setPath('userData', dataDir);
@@ -144,13 +150,13 @@ else {
       if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== page) throw new Error('拒绝未知来源');
       try {
         const result = await action(name, value);
-        if (name === 'import' && !result.canceled) await dialog.showMessageBox(window, {
+        if (targetFor(name) && !result.canceled) await dialog.showMessageBox(window, {
           type: 'info', title: 'OW Bridge', message: result.changed === false ? '配置已是最新' : '导入完成',
           detail: importMessage(result), buttons: ['确定'], defaultId: 0, cancelId: 0,
         });
         return { ok: true, result };
       } catch (error) {
-        if (name === 'import') await dialog.showMessageBox(window, {
+        if (targetFor(name)) await dialog.showMessageBox(window, {
           type: 'error', title: 'OW Bridge', message: '导入失败', detail: error.message, buttons: ['确定'], defaultId: 0, cancelId: 0,
         });
         return { ok: false, error: error.message };

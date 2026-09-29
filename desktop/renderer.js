@@ -62,7 +62,7 @@ function renderDetails() {
 }
 function render() {
   const busy = pendingAction || state.actionBusy || state.probe?.running || state.phase !== 'ready';
-  for (const id of ['refresh', 'probe', 'import', 'proxy']) $(id).disabled = !!busy;
+  for (const id of ['refresh', 'probe', 'import', 'import-ai', 'proxy']) $(id).disabled = !!busy;
   $('restart').hidden = state.phase !== 'error';
   $('restart').disabled = !!(pendingAction || state.actionBusy);
   $('proxy').disabled = !!(pendingAction || state.actionBusy || state.probe?.running || !['ready', 'error'].includes(state.phase));
@@ -72,12 +72,13 @@ function render() {
   $('discovered').textContent = state.models?.length || 0;
   $('available').textContent = state.availableModels?.length || 0;
   $('pending').textContent = state.models?.filter(m => rank(m) === 1).length || 0;
-  for (const [id, title, active] of [['refresh', '读取免费模型', state.actionBusy === 'refresh'], ['probe', '检测全部', state.probe?.running], ['import', '导入 WorkBuddy', state.actionBusy === 'import']]) {
+  for (const [id, title, running] of [['refresh', '读取免费模型', '正在读取…'], ['probe', '检测全部', '正在检测…'], ['import', '导入 WorkBuddy', '正在导入…'], ['import-ai', '导入 WorkBuddy AI', '正在导入…']]) {
+    const active = state.actionBusy === id;
     $(id).replaceChildren(); if (active) $(id).append(element('span', 'spinner'));
-    $(id).append(document.createTextNode(active ? id === 'import' ? '正在导入…' : id === 'refresh' ? '正在读取…' : '正在检测…' : title));
+    $(id).append(document.createTextNode(active ? running : title));
   }
   const sync = state.sync;
-  $('sync').textContent = sync?.error || (sync?.time ? `已导入 ${sync.count ?? 0} 个模型 · 再次检测后需点击导入 WorkBuddy 更新` : '首次读取和检测完成后自动导入 WorkBuddy');
+  $('sync').textContent = sync?.error || (sync?.time ? `已导入 ${sync.count ?? 0} 个模型到 ${sync.label || 'WorkBuddy'} · 再次检测后需点击对应导入按钮更新` : '首次读取和检测完成后自动导入 WorkBuddy');
   renderModels(); renderDetails();
 }
 async function run(name, value) {
@@ -85,16 +86,17 @@ async function run(name, value) {
   try {
     const response = await window.buddy.action(name, value);
     if (!response.ok) throw new Error(response.error);
-    if (name === 'import') {
+    if (name.startsWith('import')) {
       const r = response.result;
       if (r.canceled) { feedback('已取消导入，配置未更改。'); return; }
-      feedback(r.changed === false ? `配置已是最新，共 ${r.count} 个模型，无需重复写入。` : `导入完成，已将 ${r.count} 个可用模型导入 WorkBuddy。`);
+      const to = r.label || 'WorkBuddy';
+      feedback(r.changed === false ? `${to} 配置已是最新，共 ${r.count} 个模型，无需重复写入。` : `导入完成，已将 ${r.count} 个可用模型导入 ${to}。`);
     }
   } catch (error) { feedback(error.message, true); }
   finally { pendingAction = false; render(); }
 }
 function feedback(text, error = false) { $('feedback').textContent = text; $('feedback').className = error ? 'error' : ''; $('feedback').hidden = false; }
-for (const action of ['refresh', 'probe', 'import', 'restart']) $(action).onclick = () => run(action);
+for (const action of ['refresh', 'probe', 'import', 'import-ai', 'restart']) $(action).onclick = () => run(action);
 $('proxy').onchange = () => run('system-proxy', $('proxy').checked);
 function dismiss() { selected = null; renderModels(); renderDetails(); }
 document.addEventListener('click', e => { if (!e.target.closest('.model') && !e.target.closest('#details')) dismiss(); });
