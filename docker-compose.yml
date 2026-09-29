@@ -1,0 +1,20 @@
+services:
+  ow-bridge:
+    build:
+      context: .
+    image: ow-bridge:local
+    container_name: ow-bridge
+    restart: unless-stopped
+    ports:
+      - "41980:41980"
+    environment:
+      BUDDY_HOST: 0.0.0.0
+      BUDDY_PORT: 41980
+      BUDDY_DATA_DIR: /data
+      # No WorkBuddy installation inside the container.
+      BUDDY_NO_SYNC: "1"
+    volumes:
+      - ow-bridge-data:/data
+
+volumes:
+  ow-bridge-data:

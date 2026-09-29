@@ -17,6 +17,8 @@ import { atomicWrite, syncModels } from './sync.js';
 const dataDir = process.env.BUDDY_DATA_DIR || dataDirectory();
 const port = Number(process.env.BUDDY_PORT || 41980);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid BUDDY_PORT');
+// Defaults to loopback for desktop use; containers set BUDDY_HOST=0.0.0.0 for port publishing.
+const host = process.env.BUDDY_HOST || '127.0.0.1';
 await fs.mkdir(dataDir, { recursive: true, mode: 0o700 });
 const lockFile = path.join(dataDir, 'service.pid');
 try {
@@ -289,7 +291,7 @@ try {
   binary = await findRuntime(dataDir, message => update({ message }));
   server = createServer({ key, backend: { complete: (...args) => runtime.backend.complete(...args) }, getModels: publishedModels, refresh: readModels, importModels, setSystemProxy,
     status: () => state, probe: startProbes, onResult: record, onActivity: noteActivity });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
   update({ message: '正在启动隔离模型服务' });
   runtime = attachTranslator(await startBackend(binary, dataDir, log, await systemProxyEnvironment(state.useSystemProxy)));
   watchRuntime(runtime);
